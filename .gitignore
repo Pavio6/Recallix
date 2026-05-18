@@ -5,6 +5,8 @@
 
 .env
 
-api
-worker
+/api
+/worker
+
+/images
 
