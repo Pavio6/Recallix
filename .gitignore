@@ -1,0 +1,10 @@
+.idea
+.agents
+
+/docs
+
+.env
+
+api
+worker
+
