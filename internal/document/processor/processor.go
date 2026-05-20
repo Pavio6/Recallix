@@ -26,11 +26,11 @@ import (
 type DocProcessor struct {
 	db    *gorm.DB
 	embed *llm.EmbeddingClient
-	vs    *vectorstore.MilvusStore
+	vs    vectorstore.VectorStore
 	store *storage.FileStorage
 }
 
-func NewDocProcessor(db *gorm.DB, embed *llm.EmbeddingClient, vs *vectorstore.MilvusStore, store *storage.FileStorage) *DocProcessor {
+func NewDocProcessor(db *gorm.DB, embed *llm.EmbeddingClient, vs vectorstore.VectorStore, store *storage.FileStorage) *DocProcessor {
 	return &DocProcessor{db: db, embed: embed, vs: vs, store: store}
 }
 
@@ -132,7 +132,7 @@ func (dp *DocProcessor) HandleDocumentProcess(t *asynq.Task) error {
 		}
 
 		if dp.vs != nil {
-			if err := dp.vs.InsertChunk(vectorstore.VectorRecord{
+			if err := dp.vs.InsertChunk(context.Background(), vectorstore.VectorRecord{
 				ChunkID:         chunk.ID,
 				UserID:          knowledge.UserID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,

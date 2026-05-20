@@ -14,6 +14,7 @@ import (
 	"github.com/hibiken/asynq"
 	"gorm.io/gorm"
 
+	agentcfg "recallix/internal/agent"
 	"recallix/internal/auth"
 	"recallix/internal/chat/service"
 	"recallix/internal/chat/session"
@@ -36,7 +37,7 @@ type App struct {
 	Router     *gin.Engine
 	TaskClient *asynq.Client
 	TaskServer *asynq.Server
-	Milvus     *vectorstore.MilvusStore
+	VectorStore vectorstore.VectorStore
 }
 
 func New() (*App, error) {
@@ -53,10 +54,9 @@ func New() (*App, error) {
 		return nil, fmt.Errorf("migration: %w", err)
 	}
 
-	var vs *vectorstore.MilvusStore
-	vs, err = vectorstore.New(cfg)
+	vs, err := vectorstore.NewPGStore(db, cfg.EmbeddingDimension)
 	if err != nil {
-		log.Printf("WARNING: Failed to connect to Milvus: %v (vector search will be unavailable)", err)
+		log.Printf("WARNING: Failed to initialize pgvector store: %v (vector search will be unavailable)", err)
 		vs = nil
 	}
 
@@ -78,13 +78,15 @@ func New() (*App, error) {
 	sessionHandler := session.NewHandler(db)
 
 	memService := memory.NewService(db, chatClient, embedClient, vs)
+	agentService := agentcfg.NewService(db, cfg, store)
+	agentHandler := agentcfg.NewHandler(db, agentService)
 
 	var hybridService *hybrid.Service
 	if vs != nil {
 		hybridService = hybrid.NewService(db, embedClient, vs)
 	}
 
-	chatService := service.New(db, cfg, chatClient, embedClient, rerankClient, hybridService, memService, taskClient)
+	chatService := service.New(db, cfg, chatClient, embedClient, rerankClient, hybridService, memService, taskClient, agentService)
 
 	docProc := processor.NewDocProcessor(db, embedClient, vs, store)
 
@@ -146,7 +148,16 @@ func New() (*App, error) {
 
 			protected.POST("/sessions", sessionHandler.Create)
 			protected.GET("/sessions/recent", sessionHandler.ListRecent)
+			protected.GET("/sessions/:id", sessionHandler.Get)
 			protected.GET("/sessions/:id/messages", sessionHandler.GetMessages)
+			protected.PUT("/sessions/:id", sessionHandler.Update)
+			protected.GET("/agents", agentHandler.ListAgents)
+			protected.POST("/agents", agentHandler.CreateAgent)
+			protected.GET("/agents/:id", agentHandler.GetAgent)
+			protected.PUT("/agents/:id", agentHandler.UpdateAgent)
+			protected.GET("/skills", agentHandler.ListSkills)
+			protected.POST("/skills/import", agentHandler.ImportSkill)
+			protected.DELETE("/skills/:id", agentHandler.DeleteSkill)
 
 			if chatService != nil {
 				protected.POST("/sessions/:id/chat", chatService.Chat)
@@ -183,7 +194,7 @@ func New() (*App, error) {
 		Router:     r,
 		TaskClient: taskClient,
 		TaskServer: taskServer,
-		Milvus:     vs,
+		VectorStore: vs,
 	}, nil
 }
 

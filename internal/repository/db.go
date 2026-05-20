@@ -32,6 +32,9 @@ func NewDB(cfg *config.Config) (*gorm.DB, error) {
 }
 
 func AutoMigrate(db *gorm.DB) error {
+	// Enable pgvector extension (idempotent)
+	db.Exec("CREATE EXTENSION IF NOT EXISTS vector")
+
 	return db.AutoMigrate(
 		&User{},
 		&RefreshToken{},
@@ -43,6 +46,10 @@ func AutoMigrate(db *gorm.DB) error {
 		&Session{},
 		&Message{},
 		&MessageReference{},
+		&MessageSkillTrace{},
 		&Memory{},
+		&Agent{},
+		&Skill{},
+		&AgentSkill{},
 	)
 }

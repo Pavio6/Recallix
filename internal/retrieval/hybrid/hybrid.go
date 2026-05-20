@@ -1,6 +1,7 @@
 package hybrid
 
 import (
+	"context"
 	"math"
 	"sort"
 
@@ -25,10 +26,10 @@ type Result struct {
 type Service struct {
 	db    *gorm.DB
 	embed *llm.EmbeddingClient
-	vs    *vectorstore.MilvusStore
+	vs    vectorstore.VectorStore
 }
 
-func NewService(db *gorm.DB, embed *llm.EmbeddingClient, vs *vectorstore.MilvusStore) *Service {
+func NewService(db *gorm.DB, embed *llm.EmbeddingClient, vs vectorstore.VectorStore) *Service {
 	return &Service{db: db, embed: embed, vs: vs}
 }
 
@@ -41,7 +42,7 @@ func (s *Service) Search(userID, kbID string, query string, topK int) ([]Result,
 }
 
 func (s *Service) SearchWithEmbedding(userID, kbID string, query string, queryEmb []float32, topK int) ([]Result, error) {
-	vecResults, err := s.vs.SearchChunks(userID, kbID, queryEmb, topK*2)
+	vecResults, err := s.vs.SearchChunks(context.Background(), userID, kbID, queryEmb, topK*2)
 	if err != nil {
 		vecResults = make([]vectorstore.SearchResult, 0)
 	}

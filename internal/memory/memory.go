@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -18,7 +19,7 @@ type Service struct {
 	db    *gorm.DB
 	chat  *llm.ChatClient
 	embed *llm.EmbeddingClient
-	vs    *vectorstore.MilvusStore
+	vs    vectorstore.VectorStore
 }
 
 type Candidate struct {
@@ -34,7 +35,7 @@ type Decision struct {
 	MemoryText     string `json:"memory_text"`
 }
 
-func NewService(db *gorm.DB, chat *llm.ChatClient, embed *llm.EmbeddingClient, vs *vectorstore.MilvusStore) *Service {
+func NewService(db *gorm.DB, chat *llm.ChatClient, embed *llm.EmbeddingClient, vs vectorstore.VectorStore) *Service {
 	return &Service{db: db, chat: chat, embed: embed, vs: vs}
 }
 
@@ -178,7 +179,7 @@ func (s *Service) createMemory(userID string, decision Decision, emb []float32) 
 		return fmt.Errorf("create memory: %w", err)
 	}
 	if s.vs != nil {
-		if err := s.vs.InsertMemory(vectorstore.VectorRecord{
+		if err := s.vs.InsertMemory(context.Background(), vectorstore.VectorRecord{
 			MemoryID:  memory.ID,
 			UserID:    userID,
 			Embedding: emb,
@@ -204,10 +205,10 @@ func (s *Service) updateMemory(userID string, decision Decision, emb []float32) 
 		return fmt.Errorf("update memory: %w", err)
 	}
 	if s.vs != nil {
-		if err := s.vs.DeleteMemory(memory.ID); err != nil {
+		if err := s.vs.DeleteMemory(context.Background(), memory.ID); err != nil {
 			return fmt.Errorf("delete old memory vector: %w", err)
 		}
-		if err := s.vs.InsertMemory(vectorstore.VectorRecord{
+		if err := s.vs.InsertMemory(context.Background(), vectorstore.VectorRecord{
 			MemoryID:  memory.ID,
 			UserID:    userID,
 			Embedding: emb,
@@ -230,7 +231,7 @@ func (s *Service) RecallWithEmbedding(userID string, queryEmb []float32, topK in
 	if s.vs == nil {
 		return []repository.Memory{}, nil
 	}
-	results, err := s.vs.SearchMemories(userID, queryEmb, topK)
+	results, err := s.vs.SearchMemories(context.Background(), userID, queryEmb, topK)
 	if err != nil || len(results) == 0 {
 		return []repository.Memory{}, nil
 	}
@@ -261,7 +262,7 @@ func (s *Service) Delete(userID, memoryID string) error {
 		return err
 	}
 	if s.vs != nil {
-		return s.vs.DeleteMemory(memoryID)
+		return s.vs.DeleteMemory(context.Background(), memoryID)
 	}
 	return nil
 }

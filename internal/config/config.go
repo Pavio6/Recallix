@@ -23,14 +23,12 @@ type Config struct {
 	RedisPassword string
 	RedisDB       int
 
-	MilvusHost string
-	MilvusPort string
-
 	JWTSecret        string
 	JWTAccessExpire  time.Duration
 	JWTRefreshExpire time.Duration
 
 	ChatModel             string
+	AgentModel            string
 	ChatModelBaseURL      string
 	ChatModelAPIKey       string
 	EmbeddingModel        string
@@ -54,6 +52,10 @@ type Config struct {
 	MinIOUseSSL          bool
 
 	WorkerConcurrency int
+
+	SkillSandboxMode    string
+	SkillSandboxTimeout time.Duration
+	SkillSandboxImage   string
 }
 
 func Load() *Config {
@@ -73,14 +75,12 @@ func Load() *Config {
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),
 		RedisDB:       0,
 
-		MilvusHost: getEnv("MILVUS_HOST", "localhost"),
-		MilvusPort: getEnv("MILVUS_PORT", "19530"),
-
 		JWTSecret:        getEnv("JWT_SECRET", "change-me"),
 		JWTAccessExpire:  6 * time.Hour,
 		JWTRefreshExpire: 30 * 24 * time.Hour,
 
 		ChatModel:             getEnv("CHAT_MODEL", "deepseek-v4-pro"),
+		AgentModel:            getEnv("AGENT_MODEL", "deepseek-v4-pro"),
 		ChatModelBaseURL:      getEnv("CHAT_MODEL_BASE_URL", "https://api.deepseek.com"),
 		ChatModelAPIKey:       getEnv("CHAT_MODEL_API_KEY", ""),
 		EmbeddingModel:        getEnv("EMBEDDING_MODEL", "text-embedding-v3"),
@@ -103,6 +103,10 @@ func Load() *Config {
 		MinIOUseSSL:          getEnvBool("MINIO_USE_SSL", false),
 
 		WorkerConcurrency: 5,
+
+		SkillSandboxMode:    getEnv("SKILL_SANDBOX_MODE", "disabled"),
+		SkillSandboxTimeout: 10 * time.Second,
+		SkillSandboxImage:   getEnv("SKILL_SANDBOX_IMAGE", "wechatopenai/weknora-sandbox:latest"),
 	}
 
 	if dim := os.Getenv("EMBEDDING_MODEL_DIMENSION"); dim != "" {
@@ -123,6 +127,11 @@ func Load() *Config {
 	if refresh := os.Getenv("JWT_REFRESH_EXPIRE"); refresh != "" {
 		if d, err := time.ParseDuration(refresh); err == nil {
 			cfg.JWTRefreshExpire = d
+		}
+	}
+	if timeout := os.Getenv("SKILL_SANDBOX_TIMEOUT"); timeout != "" {
+		if d, err := time.ParseDuration(timeout); err == nil && d > 0 {
+			cfg.SkillSandboxTimeout = d
 		}
 	}
 

@@ -3,13 +3,13 @@
 # === Development mode (run infrastructure in Docker, app + frontend locally) ===
 
 dev-start:
-	docker compose up -d postgres redis milvus minio minio-init
-	@echo "Infrastructure started (postgres, redis, milvus, minio)"
+	docker compose up -d postgres redis minio minio-init
+	@echo "Infrastructure started (postgres, redis, minio)"
 	@echo "Now run: make dev-app (new terminal) and make dev-frontend (new terminal)"
 
 dev-app:
 	@echo "Starting API server (http://localhost:8081)..."
-	DB_HOST=localhost REDIS_ADDR=localhost:6379 MILVUS_HOST=localhost MINIO_ENDPOINT=localhost:9000 go run ./cmd/api
+	DB_HOST=localhost REDIS_ADDR=localhost:6379 MINIO_ENDPOINT=localhost:9000 go run ./cmd/api
 
 dev-frontend:
 	@echo "Starting frontend dev server (http://localhost:5173)..."
