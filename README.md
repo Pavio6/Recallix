@@ -11,7 +11,7 @@
    MinIO 对象存储 ──→ Redis / Asynq 异步队列
         │                    │
         │                    ▼
-        │          解析 → 分片 → 嵌入 → Milvus
+         │          解析 → 分片 → 嵌入 → pgvector
         │
         ▼
   用户提问 ──→ 意图识别 + 问题改写
@@ -54,7 +54,7 @@ Worker 并发从 Redis 拉取任务，执行：
 1. **解析（Parser）** — `PlainParser` 处理 `.md`/`.txt`，`DocxParser` 提取 `.docx` 的 XML 文本
 2. **分片（Chunker）** — 根据文档结构自动选择切分策略
 3. **嵌入（Embedding）** — 调用嵌入模型（如 `text-embedding-v3`）将每个 chunk 转为 1024 维向量
-4. **入库（Milvus + PostgreSQL）** — chunk 文本写入 PostgreSQL，向量写入 Milvus
+4. **入库（pgvector + PostgreSQL）** — chunk 文本写入 PostgreSQL，向量写入 pgvector
 5. 完成后 `parse_status = "done"`，失败则 `"failed"`
 
 ---
@@ -134,7 +134,7 @@ chunkAuto 决策顺序：
 
 | 召回通道 | 实现 | 权重 |
 |---------|------|------|
-| 向量检索 | Milvus L2 距离搜索，限定 `user_id` + `knowledge_base_id` | 70% |
+| 向量检索 | pgvector 余弦距离搜索，限定 `user_id` + `knowledge_base_id` | 70% |
 | 关键词检索 | PostgreSQL 词频匹配（BM25-like） | 30% |
 
 两路分数归一化后加权求和，按融合分数降序排列。
@@ -209,7 +209,6 @@ chunkAuto 决策顺序：
 |------|------|
 | 后端框架 | Go、Gin、GORM |
 | 数据库 | PostgreSQL（pgvector） |
-| 向量数据库 | Milvus |
 | 对象存储 | MinIO |
 | 任务队列 | Redis + Asynq |
 | 大模型 | DeepSeek V4（对话）、DashScope（嵌入 + Rerank） |
@@ -238,7 +237,6 @@ cp .env.example .env    # 如有 .env.example
 ```
 DB_HOST=localhost
 REDIS_ADDR=localhost:6379
-MILVUS_HOST=localhost
 MINIO_ENDPOINT=localhost:9000
 ```
 
@@ -248,7 +246,7 @@ MINIO_ENDPOINT=localhost:9000
 make dev-start
 ```
 
-启动 PostgreSQL、Redis、Milvus、MinIO（Docker 容器）。
+启动 PostgreSQL、Redis、MinIO（Docker 容器）。
 
 ### 3. 启动 API
 
