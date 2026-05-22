@@ -1,42 +1,58 @@
-# Recallix
+<div align="center">
 
-基于 RAG 架构的私有知识库智能问答系统。支持多格式文档入库、自动分片、向量检索、混合召回、重排序和流式问答，实现知识文档的智能检索与结果溯源。
+# 🔮 Recallix
 
-## 整体架构
+**基于 RAG 架构的私有知识库智能问答系统**
 
+[![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go&logoColor=white)](https://go.dev/)
+[![React](https://img.shields.io/React-19-61DAFB?style=flat&logo=react&logoColor=black)](https://react.dev/)
+[![PostgreSQL](https://img.shields.io/PostgreSQL-4169E1?style=flat&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Docker](https://img.shields.io/Docker-2496ED?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
+[![License](https://img.shields.io/badge/License-MIT-green?style=flat)](LICENSE)
+
+*支持多格式文档入库、自动分片、向量检索、混合召回、重排序和流式问答*
+
+</div>
+
+---
+
+## 📐 整体架构
+
+```mermaid
+flowchart TB
+    subgraph ingestion [文档入库流程]
+        A[用户上传文档] --> B[MinIO 对象存储]
+        B --> C[Redis / Asynq 异步队列]
+        C --> D[解析 → 分片 → 嵌入]
+        D --> E[pgvector 向量存储]
+    end
+
+    subgraph query [智能问答流程]
+        F[用户提问] --> G[意图识别 + 问题改写]
+        G --> H[混合检索 — 向量 + 关键词]
+        H --> I[Rerank + 分数阈值过滤]
+        I --> J[Prompt 组装]
+        J --> K[LLM 流式生成]
+        K --> L[SSE 返回]
+        L --> M[引用快照 / 检索状态持久化]
+    end
+
+    E -.->|知识库上下文| H
+
+    style ingestion fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    style query fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
 ```
-用户上传文档（.md / .txt / .docx）
-        │
-        ▼
-   MinIO 对象存储 ──→ Redis / Asynq 异步队列
-        │                    │
-        │                    ▼
-         │          解析 → 分片 → 嵌入 → pgvector
-        │
-        ▼
-  用户提问 ──→ 意图识别 + 问题改写
-        │
-        ▼
-  混合检索（向量 + 关键词）
-        │
-        ▼
-  Rerank + 分数阈值过滤
-        │
-        ▼
-  Prompt 组装 ──→ LLM 流式生成 ──→ SSE 返回
-        │
-        ▼
-  引用快照 / 检索状态持久化（溯源）
-```
 
-## RAG 核心流程
+---
 
-### 1. 文档入库与异步处理
+## 🔄 RAG 核心流程
+
+### 1️⃣ 文档入库与异步处理
 
 **上传入口：** `POST /api/v1/knowledge-bases/:id/files`
 
 | 步骤 | 说明 |
-|------|------|
+|:------:|------|
 | 格式校验 | 支持 `.md` `.txt` `.docx`，其余格式拒绝 |
 | SHA-256 去重 | 同用户下相同内容文件不重复入库 |
 | MinIO 存储 | 文件以对象形式存入 MinIO（bucket: `recallix`） |
@@ -59,7 +75,7 @@ Worker 并发从 Redis 拉取任务，执行：
 
 ---
 
-### 2. Chunk 分片策略
+### 2️⃣ Chunk 分片策略
 
 四种策略，由 `chunkAuto` 自动选择：
 
@@ -88,21 +104,21 @@ chunkAuto 决策顺序：
 #### 配置默认值
 
 | 参数 | 默认值 | 说明 |
-|------|--------|------|
+|:----:|:------:|------|
 | `ChunkSize` | 512 | 目标 chunk 大小（字符数） |
 | `ChunkOverlap` | 80 | 相邻 chunk 之间的重叠字符数 |
 | 分隔符序列 | 7 级 | `双换行 → 单换行 → 句号 → 感叹号 → 问号 → 分号英文 → 分号中文` |
 
 ---
 
-### 3. 查询理解与检索控制
+### 3️⃣ 查询理解与检索控制
 
 每次用户提问先经过 `query.Understand()` —— 单次 LLM 调用同时完成改写和意图分类。
 
 **6 种意图：**
 
 | 意图 | 含义 | 是否触发检索 |
-|------|------|-------------|
+|:----:|------|:-------------:|
 | `kb_search` | 知识检索型问题 | ✅ |
 | `clarification` | 模糊但知识型 | ✅ |
 | `greeting` | 问候/寒暄 | ❌ |
@@ -128,12 +144,12 @@ chunkAuto 决策顺序：
 
 ---
 
-### 4. 混合检索与重排序
+### 4️⃣ 混合检索与重排序
 
 **混合召回：** 向量检索 + 关键词检索融合
 
 | 召回通道 | 实现 | 权重 |
-|---------|------|------|
+|:---------:|------|:----:|
 | 向量检索 | pgvector 余弦距离搜索，限定 `user_id` + `knowledge_base_id` | 70% |
 | 关键词检索 | PostgreSQL 词频匹配（BM25-like） | 30% |
 
@@ -160,7 +176,7 @@ chunkAuto 决策顺序：
 **相关环境变量：**
 
 | 变量 | 默认值 | 说明 |
-|------|--------|------|
+|:----:|:------:|------|
 | `RAG_TOP_K` | `5` | TopK 截断条数 |
 | `RAG_SCORE_THRESHOLD` | `0.45` | 分数保留阈值 |
 | `RAG_FALLBACK_MIN_SCORE` | `0` | 降级失败后的兜底最低分 |
@@ -169,7 +185,7 @@ chunkAuto 决策顺序：
 
 ---
 
-### 5. 流式问答与结果溯源
+### 5️⃣ 流式问答与结果溯源
 
 **Prompt 组装（按顺序拼接）：**
 
@@ -188,7 +204,7 @@ chunkAuto 决策顺序：
 **SSE 流式响应（`POST /api/v1/sessions/:id/chat`）：**
 
 | 事件类型 | 时机 | 内容 |
-|---------|------|------|
+|:--------:|------|------|
 | `references` | 回答前 | `retrieval_status` + 引用切片列表（含分数） |
 | `answer` | 逐 token | LLM 生成的回答正文 |
 | `stop` | 结束 | 流式完成标记 |
@@ -197,16 +213,16 @@ chunkAuto 决策顺序：
 **结果溯源：**
 
 | 持久化内容 | 存储位置 | 溯源能力 |
-|-----------|---------|---------|
+|:----------:|---------|---------|
 | 检索状态 | `messages.retrieval_status` | 每条回答标记 `skipped` / `hit` / `miss` |
 | 引用快照 | `message_references` 表 | 保存引用切片的 `ContentSnapshot` + `ContextHeaderSnapshot`，原文件删除后仍可追溯 |
 
 ---
 
-## 技术栈
+## 🛠️ 技术栈
 
 | 层级 | 技术 |
-|------|------|
+|:----:|------|
 | 后端框架 | Go、Gin、GORM |
 | 数据库 | PostgreSQL（pgvector） |
 | 对象存储 | MinIO |
@@ -217,7 +233,7 @@ chunkAuto 决策顺序：
 
 ---
 
-## 快速开始
+## 🚀 快速开始
 
 ### 前提条件
 
@@ -234,7 +250,7 @@ cp .env.example .env    # 如有 .env.example
 
 本地开发时创建 `.env.local` 覆盖 Docker 服务地址：
 
-```
+```env
 DB_HOST=localhost
 REDIS_ADDR=localhost:6379
 MINIO_ENDPOINT=localhost:9000
@@ -272,10 +288,10 @@ docker compose up -d
 
 ---
 
-## API 端点（RAG 相关）
+## 📡 API 端点（RAG 相关）
 
 | 方法 | 路径 | 说明 |
-|------|------|------|
+|:----:|------|------|
 | `POST` | `/api/v1/knowledge-bases` | 创建知识库 |
 | `GET` | `/api/v1/knowledge-bases` | 列出知识库 |
 | `POST` | `/api/v1/knowledge-bases/:id/files` | 上传文档到知识库 |
@@ -287,3 +303,13 @@ docker compose up -d
 | `POST` | `/api/v1/sessions/:id/chat` | 流式问答（SSE） |
 | `GET` | `/api/v1/memories` | 查看长期记忆 |
 | `DELETE` | `/api/v1/memories/:id` | 删除长期记忆 |
+
+---
+
+<div align="center">
+
+**[⬆ 回到顶部](#-recallix)**
+
+Made with ❤️ by Recallix Team
+
+</div>
