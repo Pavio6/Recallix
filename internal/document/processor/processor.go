@@ -153,7 +153,7 @@ func (dp *DocProcessor) HandleDocumentProcess(t *asynq.Task) error {
 				continue
 			}
 		} else {
-			log.Printf("[DocProcessor] Skipped vector insertion for chunk %d (Milvus unavailable)", i)
+			log.Printf("[DocProcessor] Skipped vector insertion for chunk %d (pgvector unavailable)", i)
 			hasChunkFailure = true
 		}
 
