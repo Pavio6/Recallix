@@ -6,6 +6,45 @@ import (
 	"unicode"
 )
 
+var (
+	markdownHeadingPattern = regexp.MustCompile(`(?m)^(#{1,6})\s+(.+?)\s*#*\s*$`)
+	numberedSectionPattern = regexp.MustCompile(`(?m)^[ \t]*(?:\d+(?:\.\d+){1,3}\.?[ \t]*|(?:\d+|[IVX]{1,5})[\.\)、][ \t]*)\S.{0,200}$`)
+	allCapsHeadingPattern  = regexp.MustCompile(`(?m)^[ \t]*([A-ZÄÖÜ][A-ZÄÖÜ \-]{3,80}):?\s*$`)
+	visualSeparatorPattern = regexp.MustCompile(`(?m)^[ \t]*(?:-{3,}|={3,}|\*{3,}|_{3,})[ \t]*$`)
+	excessiveBlanksPattern = regexp.MustCompile(`\n{3,}`)
+	pageFooterPattern      = regexp.MustCompile(`(?mi)^[ \t]*(?:Seite|Page|页码?)\s+\d+(?:\s*(?:von|of|/)\s*\d+)?[ \t]*$`)
+	germanChapterPattern   = regexp.MustCompile(`(?m)^[ \t]*(?:Kapitel|Abschnitt|Teil)\s+(?:[0-9]+|[IVX]{1,5})[\.: ].{0,200}$`)
+	englishChapterPattern  = regexp.MustCompile(`(?m)^[ \t]*(?:Chapter|Section|Part)\s+(?:[0-9]+|[IVX]{1,5})[\.: ].{0,200}$`)
+	chineseChapterPattern  = regexp.MustCompile(`(?m)^[ \t]*第[ \t]*[一二三四五六七八九十百千零〇0-9]+[ \t]*(?:章|节|節|部分|篇)[ \t]?.{0,200}$`)
+)
+
+type docProfile struct {
+	mdHeadingTotal       int
+	numberedSectionCount int
+	allCapsLineCount     int
+	formFeedCount        int
+	visualSepCount       int
+	germanChapterCount   int
+	englishChapterCount  int
+	chineseChapterCount  int
+	blankBlockCount      int
+}
+
+func (p docProfile) heuristicMarkerTotal() int {
+	return p.numberedSectionCount +
+		p.allCapsLineCount +
+		p.formFeedCount +
+		p.visualSepCount +
+		p.germanChapterCount +
+		p.englishChapterCount +
+		p.chineseChapterCount +
+		p.blankBlockCount
+}
+
+func (p docProfile) chapterMarkerTotal() int {
+	return p.germanChapterCount + p.englishChapterCount + p.chineseChapterCount
+}
+
 type Config struct {
 	ChunkSize    int
 	ChunkOverlap int
@@ -52,22 +91,70 @@ func Chunk(text string, cfg Config) []ChunkResult {
 }
 
 func chunkAuto(text string, cfg Config) []ChunkResult {
-	hasHeadings := regexp.MustCompile(`(?m)^#{1,6}\s`).MatchString(text)
-	hasChapterMarkers := regexp.MustCompile(`(?m)^(第[一二三四五六七八九十\d]+[章节]|\d+[\.\)、])`).MatchString(text)
+	profile := profileDocument(text)
 
 	switch {
-	case hasHeadings:
+	case profile.mdHeadingTotal > 0:
 		result := chunkByHeading(text, cfg)
 		if isValidChunkResult(result) {
 			return result
 		}
-	case hasChapterMarkers:
+	case shouldUseHeuristic(profile):
 		result := chunkByHeuristic(text, cfg)
 		if isValidChunkResult(result) {
 			return result
 		}
 	}
 	return chunkRecursive(text, cfg)
+}
+
+func profileDocument(text string) docProfile {
+	profile := docProfile{
+		formFeedCount:   strings.Count(text, "\f"),
+		blankBlockCount: len(excessiveBlanksPattern.FindAllStringIndex(text, -1)),
+	}
+
+	inFence := false
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		if markdownHeadingPattern.MatchString(line) {
+			profile.mdHeadingTotal++
+			continue
+		}
+		if numberedSectionPattern.MatchString(line) {
+			profile.numberedSectionCount++
+		}
+		if allCapsHeadingPattern.MatchString(line) {
+			profile.allCapsLineCount++
+		}
+		if visualSeparatorPattern.MatchString(line) {
+			profile.visualSepCount++
+		}
+		if germanChapterPattern.MatchString(line) {
+			profile.germanChapterCount++
+		}
+		if englishChapterPattern.MatchString(line) {
+			profile.englishChapterCount++
+		}
+		if chineseChapterPattern.MatchString(line) {
+			profile.chineseChapterCount++
+		}
+	}
+
+	return profile
+}
+
+func shouldUseHeuristic(profile docProfile) bool {
+	return profile.heuristicMarkerTotal() >= 5 ||
+		profile.formFeedCount > 0 ||
+		profile.chapterMarkerTotal() > 0
 }
 
 func isValidChunkResult(result []ChunkResult) bool {
@@ -87,8 +174,7 @@ func isValidChunkResult(result []ChunkResult) bool {
 }
 
 func chunkByHeading(text string, cfg Config) []ChunkResult {
-	headingRe := regexp.MustCompile(`(?m)^(#{1,6})\s+(.+)$`)
-	matches := headingRe.FindAllStringSubmatchIndex(text, -1)
+	matches := markdownHeadingPattern.FindAllStringSubmatchIndex(text, -1)
 
 	if len(matches) == 0 {
 		return chunkRecursive(text, cfg)
@@ -152,60 +238,155 @@ func chunkByHeading(text string, cfg Config) []ChunkResult {
 }
 
 func chunkByHeuristic(text string, cfg Config) []ChunkResult {
-	patterns := []string{
-		`\f`,
-		`\n---+\n`,
-		`\n={3,}\n`,
-		`(?m)^第[一二三四五六七八九十\d]+[章节]`,
-		`(?m)^\d+[\.\)、]\s`,
-		`(?m)^[A-Z][A-Z\s]{3,}$`,
-	}
-	combined := strings.Join(patterns, "|")
-	re := regexp.MustCompile(combined)
-	locations := re.FindAllStringIndex(text, -1)
-
-	if len(locations) == 0 {
+	runes := []rune(text)
+	bounds := findHeuristicBoundaries(text)
+	if len(bounds) == 0 {
 		return chunkRecursive(text, cfg)
+	}
+	if bounds[0] != 0 {
+		bounds = append([]int{0}, bounds...)
+	}
+	if bounds[len(bounds)-1] != len(runes) {
+		bounds = append(bounds, len(runes))
 	}
 
 	results := make([]ChunkResult, 0)
-	prevEndByte := 0
-	seq := 0
+	chunkStart := bounds[0]
+	curEnd := chunkStart
+	minChunkSize := cfg.ChunkSize / 4
+	if minChunkSize < 50 {
+		minChunkSize = 50
+	}
 
-	for _, loc := range locations {
-		if loc[1] > prevEndByte {
-			startRune := runeOffsetAtByte(text, prevEndByte)
-			endRune := runeOffsetAtByte(text, loc[1])
-			content, startRune, endRune := trimRuneSpan([]rune(text), startRune, endRune)
-			if content != "" {
-				results = append(results, ChunkResult{
-					Content:  content,
-					Seq:      seq,
-					StartPos: startRune,
-					EndPos:   endRune,
-				})
-				seq++
+	for i := 1; i < len(bounds); i++ {
+		nextEnd := bounds[i]
+		blockLen := nextEnd - curEnd
+		if blockLen > cfg.ChunkSize {
+			if curEnd > chunkStart {
+				results = appendHeuristicChunk(results, runes, chunkStart, curEnd)
 			}
+			results = appendOversizeHeuristicBlock(results, runes, curEnd, nextEnd, cfg)
+			chunkStart = nextEnd
+			curEnd = nextEnd
+			continue
 		}
-		prevEndByte = loc[1]
+
+		if nextEnd-chunkStart > cfg.ChunkSize && curEnd-chunkStart >= minChunkSize {
+			results = appendHeuristicChunk(results, runes, chunkStart, curEnd)
+			chunkStart = applyHeuristicOverlap(runes, curEnd, cfg.ChunkOverlap, bounds)
+		}
+		curEnd = nextEnd
 	}
 
-	if prevEndByte < len(text) {
-		startRune := runeOffsetAtByte(text, prevEndByte)
-		endRune := len([]rune(text))
-		content, startRune, endRune := trimRuneSpan([]rune(text), startRune, endRune)
-		if content != "" {
-			results = append(results, ChunkResult{
-				Content:  content,
-				Seq:      seq,
-				StartPos: startRune,
-				EndPos:   endRune,
-			})
-			seq++
-		}
+	if curEnd > chunkStart {
+		results = appendHeuristicChunk(results, runes, chunkStart, curEnd)
 	}
-
+	if len(results) == 0 {
+		return chunkRecursive(text, cfg)
+	}
 	return compressSeq(results)
+}
+
+func findHeuristicBoundaries(text string) []int {
+	boundMap := map[int]struct{}{}
+	for i, r := range []rune(text) {
+		if r == '\f' {
+			boundMap[i] = struct{}{}
+		}
+	}
+
+	lines := strings.Split(text, "\n")
+	pos := 0
+	inFence := false
+	for idx, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			inFence = !inFence
+		} else if !inFence && isHeuristicBoundaryLine(line) {
+			boundMap[pos] = struct{}{}
+		}
+		pos += len([]rune(line))
+		if idx < len(lines)-1 {
+			pos++
+		}
+	}
+
+	for _, loc := range excessiveBlanksPattern.FindAllStringIndex(text, -1) {
+		boundMap[runeOffsetAtByte(text, loc[1])] = struct{}{}
+	}
+
+	bounds := make([]int, 0, len(boundMap))
+	for b := range boundMap {
+		bounds = append(bounds, b)
+	}
+	sortInts(bounds)
+	return dedupeBounds(bounds)
+}
+
+func isHeuristicBoundaryLine(line string) bool {
+	return numberedSectionPattern.MatchString(line) ||
+		germanChapterPattern.MatchString(line) ||
+		englishChapterPattern.MatchString(line) ||
+		chineseChapterPattern.MatchString(line) ||
+		allCapsHeadingPattern.MatchString(line) ||
+		visualSeparatorPattern.MatchString(line) ||
+		pageFooterPattern.MatchString(line)
+}
+
+func appendHeuristicChunk(results []ChunkResult, runes []rune, start, end int) []ChunkResult {
+	content, trimmedStart, trimmedEnd := trimRuneSpan(runes, start, end)
+	if content == "" {
+		return results
+	}
+	return append(results, ChunkResult{
+		Content:  content,
+		Seq:      len(results),
+		StartPos: trimmedStart,
+		EndPos:   trimmedEnd,
+	})
+}
+
+func appendOversizeHeuristicBlock(results []ChunkResult, runes []rune, start, end int, cfg Config) []ChunkResult {
+	if end <= start {
+		return results
+	}
+	subResults := chunkRecursiveAt(string(runes[start:end]), cfg, start)
+	for _, result := range subResults {
+		result.Seq = len(results)
+		results = append(results, result)
+	}
+	return results
+}
+
+func applyHeuristicOverlap(runes []rune, curEnd, overlap int, bounds []int) int {
+	if overlap <= 0 {
+		return curEnd
+	}
+	target := curEnd - overlap
+	if target < 0 {
+		target = 0
+	}
+	windowStart := curEnd - 2*overlap
+	if windowStart < 0 {
+		windowStart = 0
+	}
+
+	bestBound := -1
+	for _, b := range bounds {
+		if b >= windowStart && b < curEnd && b > bestBound {
+			bestBound = b
+		}
+	}
+	if bestBound >= 0 {
+		return bestBound
+	}
+
+	for i := target; i > windowStart && i < len(runes); i-- {
+		if runes[i] == '\n' {
+			return i + 1
+		}
+	}
+	return target
 }
 
 func chunkRecursive(text string, cfg Config) []ChunkResult {
@@ -365,4 +546,29 @@ func compressSeq(results []ChunkResult) []ChunkResult {
 		results[i].Seq = i
 	}
 	return results
+}
+
+func sortInts(values []int) {
+	for i := 1; i < len(values); i++ {
+		v := values[i]
+		j := i - 1
+		for j >= 0 && values[j] > v {
+			values[j+1] = values[j]
+			j--
+		}
+		values[j+1] = v
+	}
+}
+
+func dedupeBounds(values []int) []int {
+	if len(values) == 0 {
+		return values
+	}
+	out := values[:1]
+	for _, v := range values[1:] {
+		if v != out[len(out)-1] {
+			out = append(out, v)
+		}
+	}
+	return out
 }
