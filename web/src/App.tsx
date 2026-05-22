@@ -29,6 +29,8 @@ export default function App() {
           <Route index element={<Navigate to="chat" replace />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="knowledge" element={<KnowledgePage />} />
+          <Route path="agents" element={<Navigate to="chat" replace />} />
+          <Route path="skills" element={<Navigate to="chat" replace />} />
         </Route>
         <Route path="*" element={<Navigate to="/app/chat" replace />} />
       </Routes>

@@ -1,7 +1,7 @@
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 
 interface StreamResponse {
-  response_type: 'answer' | 'thinking' | 'references' | 'error' | 'stop'
+  response_type: 'answer' | 'thinking' | 'references' | 'skills' | 'error' | 'stop'
   content?: string
   done?: boolean
   retrieval_status?: RetrievalStatus
@@ -17,6 +17,7 @@ export function streamChat(
   handlers: {
     onAnswer?: (content: string) => void
     onReferences?: (refs: any[], retrievalStatus?: RetrievalStatus) => void
+    onSkills?: (skills: any[]) => void
     onError?: (msg: string) => void
     onDone?: () => void
   }
@@ -52,6 +53,9 @@ export function streamChat(
             break
           case 'references':
             handlers.onReferences?.(parsed.references || [], parsed.retrieval_status)
+            break
+          case 'skills':
+            handlers.onSkills?.(parsed.data || [])
             break
           case 'error':
             if (!doneCalled) {

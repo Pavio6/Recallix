@@ -68,9 +68,13 @@ export const knowledgeAPI = {
 }
 
 export const sessionAPI = {
-  create: (title?: string) => api.post('/sessions', { title }),
+  create: (title?: string, mode: 'quick_answer' | 'agent_reasoning' = 'quick_answer', agentId?: string) =>
+    api.post('/sessions', { title, mode, agent_id: agentId }),
   listRecent: () => api.get('/sessions/recent'),
+  get: (id: string) => api.get(`/sessions/${id}`),
   getMessages: (id: string) => api.get(`/sessions/${id}/messages`),
+  update: (id: string, data: { mode: 'quick_answer' | 'agent_reasoning'; agent_id?: string }) =>
+    api.put(`/sessions/${id}`, data),
 }
 
 export const chatAPI = {
@@ -83,6 +87,19 @@ export const chatAPI = {
       },
       body: JSON.stringify({ question }),
     }),
+}
+
+export const agentAPI = {
+  list: () => api.get('/agents'),
+  get: (id: string) => api.get(`/agents/${id}`),
+  create: (data: { name?: string; nickname?: string; model?: string; prompt?: string; skill_ids: string[] }) =>
+    api.post('/agents', data),
+  update: (id: string, data: { name?: string; nickname?: string; model?: string; prompt?: string; skill_ids: string[] }) =>
+    api.put(`/agents/${id}`, data),
+  listSkills: () => api.get('/skills'),
+  importSkill: (data: { github_url: string }) =>
+    api.post('/skills/import', data),
+  deleteSkill: (id: string) => api.delete(`/skills/${id}`),
 }
 
 export default api

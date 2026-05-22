@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { Children, useState, useEffect, useRef, useCallback, type ComponentProps, type ReactNode } from 'react'
 import { useSearchParams, useOutletContext } from 'react-router-dom'
 import { Send, Loader2, BookOpen, ChevronDown } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
@@ -6,12 +6,16 @@ import remarkGfm from 'remark-gfm'
 import { sessionAPI } from '../services/api'
 import { streamChat, type RetrievalStatus } from '../services/stream'
 
+const SAFE_BREAK_TOKEN = '[[RECALLIX_BR]]'
+
 interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
   references?: Reference[]
   retrievalStatus?: RetrievalStatus
+  usedSkills?: SkillSummary[]
+  isError?: boolean
 }
 
 interface Reference {
@@ -22,6 +26,13 @@ interface Reference {
   score: number
   knowledgeId: string
   knowledgeBaseId: string
+}
+
+interface SkillSummary {
+  id: string
+  name: string
+  description?: string
+  score?: number
 }
 
 function removeDanglingBoldMarkers(text: string): string {
@@ -50,6 +61,8 @@ function removeDanglingBoldMarkers(text: string): string {
 
 function cleanContent(text: string): string {
   const normalizedText = text
+    // Preserve model-produced line breaks without enabling arbitrary HTML rendering.
+    .replace(/<br\s*\/?>/gi, SAFE_BREAK_TOKEN)
     // Remove [Source N] markers
     .replace(/\[Source\s+\d+\]\s*/g, '')
     // Remove stray bold markers (standalone ** lines or line-ending **)
@@ -65,6 +78,34 @@ function cleanContent(text: string): string {
   return removeDanglingBoldMarkers(normalizedText)
 }
 
+function renderSafeBreaks(children: ReactNode, options?: { tableCell?: boolean }): ReactNode {
+  return Children.map(children, (child) => {
+    if (typeof child !== 'string') return child
+
+    const parts = child.split(SAFE_BREAK_TOKEN)
+    if (parts.length === 1) return child
+
+    return parts.map((part, index) => (
+      <span key={index}>
+        {index > 0 && <br />}
+        {options?.tableCell ? part.replace(/^\s*-\s+/, '• ') : part}
+      </span>
+    ))
+  })
+}
+
+const markdownComponents = {
+  p: ({ children, ...props }: ComponentProps<'p'>) => (
+    <p {...props}>{renderSafeBreaks(children)}</p>
+  ),
+  li: ({ children, ...props }: ComponentProps<'li'>) => (
+    <li {...props}>{renderSafeBreaks(children)}</li>
+  ),
+  td: ({ children, ...props }: ComponentProps<'td'>) => (
+    <td {...props}>{renderSafeBreaks(children, { tableCell: true })}</td>
+  ),
+}
+
 function normalizeReferences(refs: any[] = []): Reference[] {
   return refs.map((ref) => ({
     chunkId: ref.chunk_id ?? ref.ChunkID ?? '',
@@ -74,6 +115,15 @@ function normalizeReferences(refs: any[] = []): Reference[] {
     score: ref.score ?? ref.Score ?? 0,
     knowledgeId: ref.knowledge_id ?? ref.KnowledgeID ?? '',
     knowledgeBaseId: ref.knowledge_base_id ?? ref.KnowledgeBaseID ?? '',
+  }))
+}
+
+function normalizeSkills(skills: any[] = []): SkillSummary[] {
+  return skills.map((skill) => ({
+    id: skill.id ?? skill.ID ?? '',
+    name: skill.name ?? skill.Name ?? '',
+    description: skill.description ?? skill.Description ?? '',
+    score: skill.score ?? skill.Score,
   }))
 }
 
@@ -87,12 +137,14 @@ export default function ChatPage() {
   const [streamingContent, setStreamingContent] = useState('')
   const [streamingReferences, setStreamingReferences] = useState<Reference[]>([])
   const [streamingRetrievalStatus, setStreamingRetrievalStatus] = useState<RetrievalStatus | undefined>()
+  const [streamingSkills, setStreamingSkills] = useState<SkillSummary[]>([])
   const [loadingMessages, setLoadingMessages] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const streamContentRef = useRef('')
   const streamReferencesRef = useRef<Reference[]>([])
   const streamRetrievalStatusRef = useRef<RetrievalStatus | undefined>(undefined)
+  const streamSkillsRef = useRef<SkillSummary[]>([])
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const sendingRef = useRef(false)
   const isMultilineInput = input.includes('\n')
@@ -133,6 +185,7 @@ export default function ChatPage() {
           ...msg,
           references: normalizeReferences(msg.references),
           retrievalStatus: msg.retrieval_status,
+          usedSkills: normalizeSkills((msg as any).used_skills),
         })))
       }
     } catch {
@@ -160,9 +213,11 @@ export default function ChatPage() {
     setStreamingContent('')
     setStreamingReferences([])
     setStreamingRetrievalStatus(undefined)
+    setStreamingSkills([])
     streamContentRef.current = ''
     streamReferencesRef.current = []
     streamRetrievalStatusRef.current = undefined
+    streamSkillsRef.current = []
 
     // Ensure session exists
     let sid = sessionId
@@ -193,10 +248,28 @@ export default function ChatPage() {
         setStreamingReferences(nextRefs)
         setStreamingRetrievalStatus(retrievalStatus)
       },
+      onSkills(skills) {
+        const nextSkills = normalizeSkills(skills)
+        streamSkillsRef.current = nextSkills
+        setStreamingSkills(nextSkills)
+      },
       onError(msg) {
         console.error('Chat error:', msg)
+        const errorMsg: Message = {
+          id: (Date.now() + 2).toString(),
+          role: 'assistant',
+          content: `抱歉，本轮处理失败。\n\n${msg || '未知错误'}`,
+          references: streamReferencesRef.current,
+          retrievalStatus: streamRetrievalStatusRef.current,
+          usedSkills: streamSkillsRef.current,
+          isError: true,
+        }
+        setMessages((p) => [...p, errorMsg])
+        setStreamingContent('')
+        streamContentRef.current = ''
         sendingRef.current = false
         setSending(false)
+        loadSessions()
       },
       onDone() {
         sendingRef.current = false
@@ -211,6 +284,7 @@ export default function ChatPage() {
             content: finalContent,
             references: streamReferencesRef.current,
             retrievalStatus: streamRetrievalStatusRef.current,
+            usedSkills: streamSkillsRef.current,
           }
           setMessages((p) => [...p, assistantMsg])
         }
@@ -268,6 +342,15 @@ export default function ChatPage() {
     )
   }
 
+  const renderUsedSkills = (skills?: SkillSummary[]) => {
+    if (!skills || skills.length === 0) return null
+    return (
+      <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-1 text-xs text-blue-600 dark:bg-blue-950/40 dark:text-blue-300">
+        本轮使用技能：{skills.map((skill) => skill.name).join('、')}
+      </div>
+    )
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -279,7 +362,16 @@ export default function ChatPage() {
     <div className="flex flex-col h-full bg-white dark:bg-zinc-950">
       {/* Header */}
       <div className="px-6 py-4 border-b border-gray-200 dark:border-zinc-800 flex-shrink-0">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">智能问答</h2>
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+              快速问答
+            </h2>
+            <p className="text-xs text-gray-400 dark:text-zinc-500">
+              固定 RAG 链路，适合直接提问
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* Messages */}
@@ -290,7 +382,9 @@ export default function ChatPage() {
           </div>
         ) : messages.length === 0 && !streamingContent ? (
           <div className="flex flex-col items-center justify-center h-full text-center px-6">
-            <h3 className="text-xl font-semibold text-gray-700 dark:text-zinc-300 mb-2">基于知识库内容问答</h3>
+            <h3 className="text-xl font-semibold text-gray-700 dark:text-zinc-300 mb-2">
+              基于知识库内容问答
+            </h3>
             <p className="text-sm text-gray-400 dark:text-zinc-600 max-w-md">
               上传文档到知识库后，直接在此提问即可获得智能回答
             </p>
@@ -305,8 +399,10 @@ export default function ChatPage() {
                 <div
                   className={`max-w-[85%] rounded-2xl px-4 py-3 ${
                     msg.role === 'user'
-                      ? 'bg-blue-600 text-white dark:bg-zinc-800 dark:text-zinc-100'
-                      : 'text-gray-700 dark:text-zinc-300'
+                      ? 'bg-sky-100 text-sky-950 dark:bg-zinc-800 dark:text-zinc-100'
+                      : msg.isError
+                        ? 'border border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300'
+                        : 'text-gray-700 dark:text-zinc-300'
                   }`}
                 >
                   {msg.role === 'assistant' ? (
@@ -329,9 +425,10 @@ export default function ChatPage() {
                       [&_th]:border [&_th]:border-gray-200 [&_th]:dark:border-zinc-700 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:text-gray-800 [&_th]:dark:text-zinc-200 [&_th]:bg-gray-50 [&_th]:dark:bg-zinc-900
                       [&_td]:border [&_td]:border-gray-200 [&_td]:dark:border-zinc-800 [&_td]:px-3 [&_td]:py-2 [&_td]:text-gray-700 [&_td]:dark:text-zinc-300
                     ">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{cleanContent(msg.content)}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{cleanContent(msg.content)}</ReactMarkdown>
                     </div>
                     {renderReferences(msg.references, msg.retrievalStatus)}
+                    {renderUsedSkills(msg.usedSkills)}
                     </>
                   ) : (
                     <div className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</div>
@@ -376,9 +473,10 @@ export default function ChatPage() {
                     [&_th]:border [&_th]:border-gray-200 [&_th]:dark:border-zinc-700 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:text-gray-800 [&_th]:dark:text-zinc-200 [&_th]:bg-gray-50 [&_th]:dark:bg-zinc-900
                     [&_td]:border [&_td]:border-gray-200 [&_td]:dark:border-zinc-800 [&_td]:px-3 [&_td]:py-2 [&_td]:text-gray-700 [&_td]:dark:text-zinc-300
                   ">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{cleanContent(streamingContent)}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{cleanContent(streamingContent)}</ReactMarkdown>
                   </div>
                   {renderReferences(streamingReferences, streamingRetrievalStatus)}
+                  {renderUsedSkills(streamingSkills)}
                 </div>
               </div>
             )}
@@ -387,7 +485,6 @@ export default function ChatPage() {
           </div>
         )}
       </div>
-
       {/* Input */}
       <div className="px-6 py-4 border-t border-gray-200 dark:border-zinc-800 flex-shrink-0">
         <div className="max-w-3xl mx-auto">
