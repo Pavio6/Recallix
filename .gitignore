@@ -1,12 +1,16 @@
 .idea
 .agents
-
-/docs
-
+.venv
 .env
+.DS_Store
+
+/web/dist
+/web/node_modules
 
 /api
 /worker
 
 /images
+
+/doc
 
