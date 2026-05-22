@@ -1,9 +1,13 @@
-.PHONY: dev-start dev-app dev-frontend dev-stop dev-status dev-restart build up down clean
+.PHONY: dev-start dev-app dev-frontend dev-stop dev-status dev-restart build up down clean migrate
 
 # === Development mode (run infrastructure in Docker, app + frontend locally) ===
 
 dev-start:
 	docker compose up -d postgres redis minio minio-init
+	@echo "Waiting for postgres to be ready..."
+	@sleep 3
+	@echo "Running database migration..."
+	DB_HOST=localhost DB_PORT=5432 DB_USER=recallix DB_PASSWORD=recallix DB_NAME=recallix DB_SSLMODE=disable go run ./cmd/migrate
 	@echo "Infrastructure started (postgres, redis, minio)"
 	@echo "Now run: make dev-app (new terminal) and make dev-frontend (new terminal)"
 
@@ -24,6 +28,12 @@ dev-status:
 
 dev-restart: dev-stop dev-start
 	@echo "Infrastructure restarted"
+
+# === Database migration ===
+
+migrate:
+	@echo "Running database migration..."
+	DB_HOST=localhost DB_PORT=5432 DB_USER=recallix DB_PASSWORD=recallix DB_NAME=recallix DB_SSLMODE=disable go run ./cmd/migrate
 
 # === Docker mode (everything in containers) ===
 

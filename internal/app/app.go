@@ -50,7 +50,7 @@ func New() (*App, error) {
 		return nil, fmt.Errorf("database: %w", err)
 	}
 
-	if err := repository.AutoMigrate(db); err != nil {
+	if err := repository.RunMigration(db); err != nil {
 		return nil, fmt.Errorf("migration: %w", err)
 	}
 

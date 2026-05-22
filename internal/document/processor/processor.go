@@ -50,6 +50,16 @@ func (dp *DocProcessor) HandleDocumentProcess(t *asynq.Task) error {
 		return nil
 	}
 
+	// 幂等重试：清理旧数据，确保每次重试都是干净的起点
+	if knowledge.ParseStatus == "processing" || knowledge.ParseStatus == "failed" {
+		log.Printf("[DocProcessor] Knowledge %s: cleaning up old data before retry", knowledge.ID)
+		dp.db.Where("knowledge_id = ?", knowledge.ID).Delete(&repository.Chunk{})
+		keyword.DeleteByKnowledgeID(dp.db, knowledge.ID)
+		if dp.vs != nil {
+			dp.vs.DeleteByKnowledgeID(context.Background(), knowledge.UserID, knowledge.KnowledgeBaseID, knowledge.ID)
+		}
+	}
+
 	knowledge.ParseStatus = "processing"
 	dp.db.Save(&knowledge)
 

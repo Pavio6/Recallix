@@ -190,6 +190,16 @@ func (s *PGStore) DeleteMemory(ctx context.Context, memoryID string) error {
 	return s.db.WithContext(ctx).Exec(`DELETE FROM memory_embeddings WHERE memory_id = ?`, memoryID).Error
 }
 
+// DeleteByKnowledgeID removes all chunk embeddings for a specific knowledge document.
+func (s *PGStore) DeleteByKnowledgeID(ctx context.Context, userID, kbID, knowledgeID string) error {
+	return s.db.WithContext(ctx).Exec(`
+		DELETE FROM chunk_embeddings 
+		WHERE user_id = ? AND knowledge_base_id = ? AND chunk_id IN (
+			SELECT id FROM chunks WHERE knowledge_id = ?
+		)
+	`, userID, kbID, knowledgeID).Error
+}
+
 // Close is a no-op for pgvector (connection managed by GORM).
 func (s *PGStore) Close() error {
 	return nil

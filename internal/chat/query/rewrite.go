@@ -43,9 +43,11 @@ type UnderstandResult struct {
 
 // NeedsRetrieval reports whether the current turn should enter the KB retrieval
 // path. The empty intent is treated as retrieval-needed for safety.
+// Note: IntentClarification returns false because it should first ask the user
+// to clarify the question before retrieving from the knowledge base.
 func (r UnderstandResult) NeedsRetrieval() bool {
 	switch r.Intent {
-	case IntentGreeting, IntentChitchat, IntentFollowUp, IntentSummarize:
+	case IntentGreeting, IntentChitchat, IntentFollowUp, IntentSummarize, IntentClarification:
 		return false
 	default:
 		return true

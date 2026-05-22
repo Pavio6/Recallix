@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/go-ego/gse"
 	"gorm.io/gorm"
 
 	"recallix/internal/repository"
@@ -17,9 +18,44 @@ const (
 	bm25B  = 0.75
 )
 
+var seg gse.Segmenter
+
+func init() {
+	var err error
+	seg, err = gse.NewEmbed()
+	if err != nil {
+		// Fallback to empty segmenter if loading fails
+		seg = gse.Segmenter{}
+	}
+}
+
 type Hit struct {
 	ID    string
 	Score float64
+}
+
+// DeleteByKnowledgeID removes all lexical index entries for a specific knowledge document.
+func DeleteByKnowledgeID(db *gorm.DB, knowledgeID string) error {
+	// 先获取该文档下所有 chunk IDs
+	var chunkIDs []string
+	if err := db.Model(&repository.Chunk{}).Where("knowledge_id = ?", knowledgeID).Pluck("id", &chunkIDs).Error; err != nil {
+		return err
+	}
+	if len(chunkIDs) == 0 {
+		return nil
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		// 删除 chunk_term_postings
+		if err := tx.Where("chunk_id IN ?", chunkIDs).Delete(&repository.ChunkTermPosting{}).Error; err != nil {
+			return err
+		}
+		// 删除 chunk_lexical_indices
+		if err := tx.Where("chunk_id IN ?", chunkIDs).Delete(&repository.ChunkLexicalIndex{}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // IndexChunk persists one chunk into the lexical inverted index used by BM25.
@@ -138,48 +174,35 @@ func Search(db *gorm.DB, userID, knowledgeBaseID, query string, topK int) ([]Hit
 	return hits, nil
 }
 
-// Tokenize uses Latin word tokens plus CJK bigrams. The bigram strategy keeps
-// the MVP dependency-free while making Chinese text searchable without spaces.
+// Tokenize uses gse (Go Segmenter Engine) for Chinese text segmentation.
+// This provides much better accuracy than the previous bigram approach,
+// especially for multi-character Chinese words and phrases.
 func Tokenize(text string) []string {
 	text = strings.ToLower(text)
+
+	// Use gse CutSearch mode which is optimized for search scenarios
+	// It splits compound words and keeps individual characters for better recall
+	words := seg.CutSearch(text, true)
+
+	// Filter out single characters and punctuation, keep meaningful tokens
 	var tokens []string
-	var latin []rune
-	var cjk []rune
-
-	flushLatin := func() {
-		if len(latin) > 1 {
-			tokens = append(tokens, string(latin))
+	for _, w := range words {
+		w = strings.TrimSpace(w)
+		if w == "" {
+			continue
 		}
-		latin = nil
-	}
-	flushCJK := func() {
-		switch len(cjk) {
-		case 0:
-		case 1:
-			tokens = append(tokens, string(cjk))
-		default:
-			for i := 0; i < len(cjk)-1; i++ {
-				tokens = append(tokens, string(cjk[i:i+2]))
-			}
+		// Skip single Chinese characters (keep words with 2+ chars for better precision)
+		// But keep single Latin letters/digits as they might be meaningful
+		if len([]rune(w)) == 1 && unicode.Is(unicode.Han, []rune(w)[0]) {
+			continue
 		}
-		cjk = nil
+		// Skip punctuation
+		if len([]rune(w)) == 1 && unicode.IsPunct([]rune(w)[0]) {
+			continue
+		}
+		tokens = append(tokens, w)
 	}
 
-	for _, r := range text {
-		switch {
-		case unicode.Is(unicode.Han, r):
-			flushLatin()
-			cjk = append(cjk, r)
-		case unicode.IsLetter(r) || unicode.IsDigit(r):
-			flushCJK()
-			latin = append(latin, r)
-		default:
-			flushLatin()
-			flushCJK()
-		}
-	}
-	flushLatin()
-	flushCJK()
 	return tokens
 }
 

@@ -67,6 +67,11 @@ func (h *Handler) Upload(c *gin.Context) {
 		return
 	}
 
+	// SHA-256 哈希用于文件去重：边读取文件边计算哈希，避免二次读取
+	// 选择 SHA-256 而非 MD5/SHA-1 的原因：
+	// 1. MD5/SHA-1 已被证明可构造碰撞，恶意用户可绕过去重
+	// 2. SHA-256 安全性高，性能良好，是工业界标准（TLS/Git/区块链）
+	// 3. Go 标准库提供高性能实现，无需第三方依赖
 	hash := sha256.New()
 	fileContent, err := io.ReadAll(io.TeeReader(file, hash))
 	if err != nil {
@@ -77,6 +82,7 @@ func (h *Handler) Upload(c *gin.Context) {
 		return
 	}
 
+	// 将 256 位哈希转为 64 字符十六进制字符串，便于数据库存储和索引
 	fileHash := fmt.Sprintf("%x", hash.Sum(nil))
 
 	var duplicateCount int64

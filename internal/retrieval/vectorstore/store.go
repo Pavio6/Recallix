@@ -10,6 +10,7 @@ type VectorStore interface {
 	SearchMemories(ctx context.Context, userID string, embedding []float32, topK int) ([]SearchResult, error)
 	DeleteChunk(ctx context.Context, chunkID string) error
 	DeleteMemory(ctx context.Context, memoryID string) error
+	DeleteByKnowledgeID(ctx context.Context, userID, kbID, knowledgeID string) error
 	Close() error
 }
 

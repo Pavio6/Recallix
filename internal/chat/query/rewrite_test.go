@@ -28,7 +28,7 @@ func TestNeedsRetrieval(t *testing.T) {
 		{IntentChitchat, false},
 		{IntentFollowUp, false},
 		{IntentKBSearch, true},
-		{IntentClarification, true},
+		{IntentClarification, false},
 		{IntentSummarize, false},
 		{"", true},
 	}
