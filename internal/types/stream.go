@@ -5,22 +5,24 @@ type RetrievalStatus string
 
 const (
 	// ResponseTypeAnswer 表示模型正在流式返回回答正文。
-	ResponseTypeAnswer     ResponseType = "answer"
+	ResponseTypeAnswer ResponseType = "answer"
 	// ResponseTypeReferences 表示先返回本轮检索到的知识库引用片段。
 	ResponseTypeReferences ResponseType = "references"
+	// ResponseTypeSkills 表示返回本轮最终确认使用的技能。
+	ResponseTypeSkills ResponseType = "skills"
 	// ResponseTypeThinking 预留给“思考中”一类的中间状态事件。
-	ResponseTypeThinking   ResponseType = "thinking"
+	ResponseTypeThinking ResponseType = "thinking"
 	// ResponseTypeError 表示本轮对话处理过程中发生错误。
-	ResponseTypeError      ResponseType = "error"
+	ResponseTypeError ResponseType = "error"
 	// ResponseTypeStop 表示本轮流式响应已经结束。
-	ResponseTypeStop       ResponseType = "stop"
+	ResponseTypeStop ResponseType = "stop"
 
 	// RetrievalStatusSkipped 表示本轮按意图判断跳过了知识库检索。
 	RetrievalStatusSkipped RetrievalStatus = "skipped"
 	// RetrievalStatusHit 表示本轮知识库检索命中，并保留了可用上下文。
-	RetrievalStatusHit     RetrievalStatus = "hit"
+	RetrievalStatusHit RetrievalStatus = "hit"
 	// RetrievalStatusMiss 表示本轮尝试检索，但最终没有保留可用片段。
-	RetrievalStatusMiss    RetrievalStatus = "miss"
+	RetrievalStatusMiss RetrievalStatus = "miss"
 )
 
 type StreamResponse struct {

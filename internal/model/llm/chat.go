@@ -27,14 +27,47 @@ func NewChatClient(cfg *config.Config) *ChatClient {
 }
 
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role             string     `json:"role"`
+	Content          string     `json:"content,omitempty"`
+	ReasoningContent string     `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string     `json:"tool_call_id,omitempty"`
 }
 
 type chatReq struct {
-	Model    string        `json:"model"`
-	Messages []ChatMessage `json:"messages"`
-	Stream   bool          `json:"stream"`
+	Model      string        `json:"model"`
+	Messages   []ChatMessage `json:"messages"`
+	Tools      []Tool        `json:"tools,omitempty"`
+	ToolChoice any           `json:"tool_choice,omitempty"`
+	Stream     bool          `json:"stream"`
+}
+
+type Tool struct {
+	Type     string       `json:"type"`
+	Function ToolFunction `json:"function"`
+}
+
+type ToolFunction struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
+}
+
+type ToolCall struct {
+	ID       string           `json:"id"`
+	Type     string           `json:"type"`
+	Function ToolCallFunction `json:"function"`
+}
+
+type ToolCallFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+type ChatResponse struct {
+	Content          string
+	ReasoningContent string
+	ToolCalls        []ToolCall
 }
 
 type streamChunk struct {
@@ -43,13 +76,69 @@ type streamChunk struct {
 	} `json:"choices"`
 }
 
+type chatCompletionResp struct {
+	Choices []struct {
+		Message ChatMessage `json:"message"`
+	} `json:"choices"`
+}
+
 func (c *ChatClient) Chat(messages []ChatMessage) (string, error) {
 	return c.ChatStream(messages, nil)
 }
 
+func (c *ChatClient) ChatWithModel(model string, messages []ChatMessage) (string, error) {
+	return c.ChatStreamWithModel(model, messages, nil)
+}
+
+func (c *ChatClient) ChatWithTools(model string, messages []ChatMessage, tools []Tool) (ChatResponse, error) {
+	if model == "" {
+		model = c.cfg.ChatModel
+	}
+	req := chatReq{Model: model, Messages: messages, Tools: tools, ToolChoice: "auto", Stream: false}
+	body, _ := json.Marshal(req)
+	httpReq, err := http.NewRequest("POST", c.chatURL(), bytes.NewReader(body))
+	if err != nil {
+		return ChatResponse{}, err
+	}
+	c.setHeaders(httpReq)
+	log.Printf("[Chat] POST %s (model=%s, msgs=%d, tools=%d)", c.chatURL(), model, len(messages), len(tools))
+	resp, err := c.client.Do(httpReq)
+	if err != nil {
+		return ChatResponse{}, err
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ChatResponse{}, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return ChatResponse{}, fmt.Errorf("chat API error: %s, body: %s", resp.Status, string(respBody))
+	}
+	var parsed chatCompletionResp
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return ChatResponse{}, err
+	}
+	if len(parsed.Choices) == 0 {
+		return ChatResponse{}, nil
+	}
+	message := parsed.Choices[0].Message
+	return ChatResponse{
+		Content:          message.Content,
+		ReasoningContent: message.ReasoningContent,
+		ToolCalls:        message.ToolCalls,
+	}, nil
+}
+
 func (c *ChatClient) ChatStream(messages []ChatMessage, writer func(string) error) (string, error) {
+	return c.ChatStreamWithModel(c.cfg.ChatModel, messages, writer)
+}
+
+func (c *ChatClient) ChatStreamWithModel(model string, messages []ChatMessage, writer func(string) error) (string, error) {
+	if model == "" {
+		model = c.cfg.ChatModel
+	}
 	req := chatReq{
-		Model:    c.cfg.ChatModel,
+		Model:    model,
 		Messages: messages,
 		Stream:   true,
 	}
@@ -60,7 +149,7 @@ func (c *ChatClient) ChatStream(messages []ChatMessage, writer func(string) erro
 		return "", err
 	}
 	c.setHeaders(httpReq)
-	log.Printf("[Chat] POST %s (model=%s, msgs=%d)", c.chatURL(), c.cfg.ChatModel, len(messages))
+	log.Printf("[Chat] POST %s (model=%s, msgs=%d)", c.chatURL(), model, len(messages))
 
 	resp, err := c.client.Do(httpReq)
 	if err != nil {

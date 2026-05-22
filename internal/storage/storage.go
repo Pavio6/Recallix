@@ -70,6 +70,31 @@ func (s *FileStorage) Open(ctx context.Context, filePath string) (io.ReadCloser,
 	return obj, nil
 }
 
+func (s *FileStorage) URIForObject(objectKey string) (string, error) {
+	if err := validateObjectKey(objectKey); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("minio://%s/%s", s.bucketName, objectKey), nil
+}
+
+func (s *FileStorage) ListPrefix(ctx context.Context, objectPrefix string) ([]string, error) {
+	if err := validateObjectKey(objectPrefix); err != nil {
+		return nil, err
+	}
+	var keys []string
+	objects := s.client.ListObjects(ctx, s.bucketName, minio.ListObjectsOptions{
+		Prefix:    strings.TrimSuffix(objectPrefix, "/") + "/",
+		Recursive: true,
+	})
+	for object := range objects {
+		if object.Err != nil {
+			return nil, fmt.Errorf("list objects: %w", object.Err)
+		}
+		keys = append(keys, object.Key)
+	}
+	return keys, nil
+}
+
 func (s *FileStorage) Delete(ctx context.Context, filePath string) error {
 	objectKey, err := s.parseURI(filePath)
 	if err != nil {
@@ -77,6 +102,26 @@ func (s *FileStorage) Delete(ctx context.Context, filePath string) error {
 	}
 	if err := s.client.RemoveObject(ctx, s.bucketName, objectKey, minio.RemoveObjectOptions{}); err != nil {
 		return fmt.Errorf("delete file from MinIO: %w", err)
+	}
+	return nil
+}
+
+// DeletePrefix 删除某个对象前缀下的全部对象，适合清理 Skill 这类目录型资源。
+func (s *FileStorage) DeletePrefix(ctx context.Context, objectPrefix string) error {
+	if err := validateObjectKey(objectPrefix); err != nil {
+		return err
+	}
+	objects := s.client.ListObjects(ctx, s.bucketName, minio.ListObjectsOptions{
+		Prefix:    strings.TrimSuffix(objectPrefix, "/") + "/",
+		Recursive: true,
+	})
+	for object := range objects {
+		if object.Err != nil {
+			return fmt.Errorf("list objects for deletion: %w", object.Err)
+		}
+		if err := s.client.RemoveObject(ctx, s.bucketName, object.Key, minio.RemoveObjectOptions{}); err != nil {
+			return fmt.Errorf("delete object %q from MinIO: %w", object.Key, err)
+		}
 	}
 	return nil
 }

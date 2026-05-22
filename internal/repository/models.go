@@ -82,18 +82,22 @@ type Session struct {
 	ID        string    `gorm:"primaryKey;size:64" json:"id"`
 	UserID    string    `gorm:"index;size:64;not null" json:"user_id"`
 	Title     string    `gorm:"size:500" json:"title"`
+	Mode      string    `gorm:"size:30;default:quick_answer" json:"mode"`
+	AgentID   *string   `gorm:"size:64" json:"agent_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type Message struct {
-	ID              string             `gorm:"primaryKey;size:64" json:"id"`
-	SessionID       string             `gorm:"index;size:64;not null" json:"session_id"`
-	Role            string             `gorm:"size:20;not null" json:"role"` // user, assistant
-	Content         string             `gorm:"type:text;not null" json:"content"`
-	RetrievalStatus string             `gorm:"size:20" json:"retrieval_status,omitempty"`
-	CreatedAt       time.Time          `json:"created_at"`
-	References      []MessageReference `gorm:"-" json:"references,omitempty"`
+	ID              string                `gorm:"primaryKey;size:64" json:"id"`
+	SessionID       string                `gorm:"index;size:64;not null" json:"session_id"`
+	Role            string                `gorm:"size:20;not null" json:"role"` // user, assistant
+	Content         string                `gorm:"type:text;not null" json:"content"`
+	RetrievalStatus string                `gorm:"size:20" json:"retrieval_status,omitempty"`
+	CreatedAt       time.Time             `json:"created_at"`
+	References      []MessageReference    `gorm:"-" json:"references,omitempty"`
+	SkillTrace      *MessageSkillTrace    `gorm:"-" json:"skill_trace,omitempty"`
+	UsedSkills      []MessageSkillSummary `gorm:"-" json:"used_skills,omitempty"`
 }
 
 // MessageReference stores the exact retrieval evidence used to generate an
@@ -114,6 +118,26 @@ type MessageReference struct {
 	CreatedAt             time.Time `json:"created_at"`
 }
 
+// MessageSkillTrace stores the skill scheduling and selection decisions that
+// shaped an assistant response. CandidateSkillsJSON and SelectedSkillsJSON
+// intentionally keep a compact snapshot so historical answers remain auditable
+// even if the underlying skill metadata changes later.
+type MessageSkillTrace struct {
+	ID                  string    `gorm:"primaryKey;size:64" json:"id"`
+	MessageID           string    `gorm:"uniqueIndex;size:64;not null" json:"message_id"`
+	CandidateSkillsJSON string    `gorm:"type:text;not null;default:'[]'" json:"candidate_skills_json"`
+	SelectedSkillsJSON  string    `gorm:"type:text;not null;default:'[]'" json:"selected_skills_json"`
+	SelectorRawOutput   string    `gorm:"type:text" json:"selector_raw_output"`
+	CreatedAt           time.Time `json:"created_at"`
+}
+
+type MessageSkillSummary struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Description string  `json:"description,omitempty"`
+	Score       float64 `json:"score,omitempty"`
+}
+
 type Memory struct {
 	ID         string    `gorm:"primaryKey;size:64" json:"id"`
 	UserID     string    `gorm:"index;size:64;not null" json:"user_id"`
@@ -122,4 +146,45 @@ type Memory struct {
 	Importance int       `gorm:"default:0" json:"importance"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+type Agent struct {
+	ID        string    `gorm:"primaryKey;size:64" json:"id"`
+	UserID    string    `gorm:"index;size:64;not null" json:"user_id"`
+	Name      string    `gorm:"size:255;not null" json:"name"`
+	Nickname  string    `gorm:"size:255" json:"nickname"`
+	Model     string    `gorm:"size:255;not null" json:"model"`
+	Prompt    string    `gorm:"type:text;not null" json:"prompt"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Skills    []Skill   `gorm:"-" json:"skills,omitempty"`
+}
+
+type Skill struct {
+	ID            string    `gorm:"primaryKey;size:64" json:"id"`
+	UserID        string    `gorm:"index;size:64" json:"user_id"`
+	Name          string    `gorm:"size:255;not null" json:"name"`
+	Description   string    `gorm:"size:1000" json:"description"`
+	SourceURL     string    `gorm:"size:2000" json:"source_url"`
+	SourceRepo    string    `gorm:"size:500" json:"source_repo"`
+	SourceRef     string    `gorm:"size:255" json:"source_ref"`
+	SourcePath    string    `gorm:"size:1000" json:"source_path"`
+	StoragePrefix string    `gorm:"size:1000" json:"storage_prefix"`
+	EntryFileURI  string    `gorm:"size:2000" json:"entry_file_uri"`
+	FileCount     int       `gorm:"default:0" json:"file_count"`
+	Enabled       bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	AgentCount    int64     `gorm:"-" json:"agent_count"`
+
+	// Legacy fields are kept only so an existing development database created by
+	// the previous prompt-fragment implementation can still accept new rows.
+	// New runtime behavior no longer reads either field.
+	LegacyInstructions string `gorm:"column:instructions;type:text;not null;default:''" json:"-"`
+	LegacySourceType   string `gorm:"column:source_type;size:20;not null;default:github" json:"-"`
+}
+
+type AgentSkill struct {
+	AgentID string `gorm:"primaryKey;size:64" json:"agent_id"`
+	SkillID string `gorm:"primaryKey;size:64" json:"skill_id"`
 }

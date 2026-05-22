@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -23,7 +24,9 @@ func NewHandler(db *gorm.DB) *Handler {
 func (h *Handler) Create(c *gin.Context) {
 	userID := auth.GetUserID(c)
 	var req struct {
-		Title string `json:"title"`
+		Title   string  `json:"title"`
+		Mode    string  `json:"mode"`
+		AgentID *string `json:"agent_id"`
 	}
 	c.ShouldBindJSON(&req)
 	if req.Title == "" {
@@ -34,6 +37,8 @@ func (h *Handler) Create(c *gin.Context) {
 		ID:        shared.NewID(),
 		UserID:    userID,
 		Title:     req.Title,
+		Mode:      normalizeMode(req.Mode),
+		AgentID:   req.AgentID,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -47,6 +52,41 @@ func (h *Handler) Create(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, shared.APIResponse{Success: true, Data: session})
+}
+
+func (h *Handler) Update(c *gin.Context) {
+	userID := auth.GetUserID(c)
+	sessionID := c.Param("id")
+
+	var session repository.Session
+	if err := h.db.Where("id = ? AND user_id = ?", sessionID, userID).First(&session).Error; err != nil {
+		c.JSON(http.StatusNotFound, shared.APIResponse{
+			Success: false,
+			Error:   &shared.APIError{Code: "NOT_FOUND", Message: "Session not found"},
+		})
+		return
+	}
+
+	var req struct {
+		Mode    string  `json:"mode"`
+		AgentID *string `json:"agent_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, shared.APIResponse{Success: false})
+		return
+	}
+	session.Mode = normalizeMode(req.Mode)
+	if session.Mode == "agent_reasoning" {
+		session.AgentID = req.AgentID
+	} else {
+		session.AgentID = nil
+	}
+	session.UpdatedAt = time.Now()
+	if err := h.db.Save(&session).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, shared.APIResponse{Success: false})
+		return
+	}
+	c.JSON(http.StatusOK, shared.APIResponse{Success: true, Data: session})
 }
 
 func (h *Handler) ListRecent(c *gin.Context) {
@@ -81,6 +121,13 @@ func (h *Handler) ListRecent(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, shared.APIResponse{Success: true, Data: result})
+}
+
+func normalizeMode(mode string) string {
+	if mode == "agent_reasoning" {
+		return mode
+	}
+	return "quick_answer"
 }
 
 func (h *Handler) GetMessages(c *gin.Context) {
@@ -121,7 +168,35 @@ func (h *Handler) GetMessages(c *gin.Context) {
 				messages[idx].References = append(messages[idx].References, ref)
 			}
 		}
+
+		var traces []repository.MessageSkillTrace
+		h.db.Where("message_id IN ?", messageIDs).Find(&traces)
+		for i := range traces {
+			trace := traces[i]
+			if idx, ok := messageIndex[trace.MessageID]; ok {
+				messages[idx].SkillTrace = &trace
+				var selected []repository.MessageSkillSummary
+				if err := json.Unmarshal([]byte(trace.SelectedSkillsJSON), &selected); err == nil {
+					messages[idx].UsedSkills = selected
+				}
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, shared.APIResponse{Success: true, Data: messages})
+}
+
+func (h *Handler) Get(c *gin.Context) {
+	userID := auth.GetUserID(c)
+	sessionID := c.Param("id")
+
+	var session repository.Session
+	if err := h.db.Where("id = ? AND user_id = ?", sessionID, userID).First(&session).Error; err != nil {
+		c.JSON(http.StatusNotFound, shared.APIResponse{
+			Success: false,
+			Error:   &shared.APIError{Code: "NOT_FOUND", Message: "Session not found"},
+		})
+		return
+	}
+	c.JSON(http.StatusOK, shared.APIResponse{Success: true, Data: session})
 }
