@@ -4,12 +4,6 @@
 
 **基于 RAG 架构的私有知识库智能问答系统**
 
-[![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go&logoColor=white)](https://go.dev/)
-[![React](https://img.shields.io/React-19-61DAFB?style=flat&logo=react&logoColor=black)](https://react.dev/)
-[![PostgreSQL](https://img.shields.io/PostgreSQL-4169E1?style=flat&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
-[![Docker](https://img.shields.io/Docker-2496ED?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
-[![License](https://img.shields.io/badge/License-MIT-green?style=flat)](LICENSE)
-
 *支持多格式文档入库、自动分片、向量检索、混合召回、重排序和流式问答*
 
 </div>
@@ -309,7 +303,5 @@ docker compose up -d
 <div align="center">
 
 **[⬆ 回到顶部](#-recallix)**
-
-Made with ❤️ by Recallix Team
 
 </div>
