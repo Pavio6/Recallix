@@ -53,10 +53,8 @@ func (dp *DocProcessor) HandleDocumentProcess(t *asynq.Task) error {
 	// 幂等重试：清理旧数据，确保每次重试都是干净的起点
 	if knowledge.ParseStatus == "processing" || knowledge.ParseStatus == "failed" {
 		log.Printf("[DocProcessor] Knowledge %s: cleaning up old data before retry", knowledge.ID)
-		dp.db.Where("knowledge_id = ?", knowledge.ID).Delete(&repository.Chunk{})
-		keyword.DeleteByKnowledgeID(dp.db, knowledge.ID)
-		if dp.vs != nil {
-			dp.vs.DeleteByKnowledgeID(context.Background(), knowledge.UserID, knowledge.KnowledgeBaseID, knowledge.ID)
+		if err := dp.cleanupKnowledgeData(context.Background(), knowledge); err != nil {
+			return fmt.Errorf("cleanup old data for knowledge %s: %w", knowledge.ID, err)
 		}
 	}
 
@@ -173,5 +171,22 @@ func (dp *DocProcessor) HandleDocumentProcess(t *asynq.Task) error {
 	dp.db.Save(&knowledge)
 
 	log.Printf("[DocProcessor] Knowledge %s: processing completed", knowledge.ID)
+	return nil
+}
+
+func (dp *DocProcessor) cleanupKnowledgeData(ctx context.Context, knowledge repository.Knowledge) error {
+	// Both lexical and vector cleanup resolve their targets through the chunks
+	// table, so chunks must be deleted last.
+	if err := keyword.DeleteByKnowledgeID(dp.db, knowledge.ID); err != nil {
+		return fmt.Errorf("delete lexical index: %w", err)
+	}
+	if dp.vs != nil {
+		if err := dp.vs.DeleteByKnowledgeID(ctx, knowledge.UserID, knowledge.KnowledgeBaseID, knowledge.ID); err != nil {
+			return fmt.Errorf("delete vectors: %w", err)
+		}
+	}
+	if err := dp.db.Where("knowledge_id = ?", knowledge.ID).Delete(&repository.Chunk{}).Error; err != nil {
+		return fmt.Errorf("delete chunks: %w", err)
+	}
 	return nil
 }
